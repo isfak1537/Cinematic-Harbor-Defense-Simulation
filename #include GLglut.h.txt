@@ -1,0 +1,401 @@
+#include <GL/glut.h>
+#include <cmath>
+#include <vector>
+#include <cstdio>
+
+// ================= GLOBAL =================
+float cannonAngle = 45;
+float radarAngle = 0;
+int score = 0;
+
+// sun ray rotation
+float sunRayAngle = 0;
+
+// birds (5 ta)
+struct Bird {
+    float x, y, speed;
+    float wingAngle, wingDir;
+};
+std::vector<Bird> birds = {
+    {-90, 60, 0.25f, 0, 1},
+    {-70, 70, 0.30f, 0, 1},
+    {-50, 65, 0.20f, 0, 1},
+    {-80, 55, 0.35f, 0, 1},
+    {-60, 75, 0.28f, 0, 1}
+};
+
+// bullets
+struct Bullet { float x,y,dx,dy; bool active; };
+std::vector<Bullet> bullets;
+
+// ships
+struct Ship { float x,y,speed; };
+std::vector<Ship> ships = {
+    {-80,80,0.3},{-30,100,0.4},{40,90,0.25}
+};
+
+// explosion particles
+struct Particle { float x,y,dx,dy,life; };
+std::vector<Particle> particles;
+
+// ================= DDA =================
+void drawLineDDA(float x1,float y1,float x2,float y2){
+    float dx=x2-x1, dy=y2-y1;
+    int steps=fabs(dx)>fabs(dy)?fabs(dx):fabs(dy);
+    if(steps==0) return;
+    float xInc=dx/steps, yInc=dy/steps;
+    float x=x1,y=y1;
+
+    glBegin(GL_POINTS);
+    for(int i=0;i<=steps;i++){
+        glVertex2f(x,y);
+        x+=xInc; y+=yInc;
+    }
+    glEnd();
+}
+
+// ================= MIDPOINT CIRCLE =================
+void drawCircleMidpoint(int xc,int yc,int r){
+    int x=0,y=r,d=1-r;
+
+    glBegin(GL_POINTS);
+    while(x<=y){
+        glVertex2i(xc+x,yc+y);
+        glVertex2i(xc-x,yc+y);
+        glVertex2i(xc+x,yc-y);
+        glVertex2i(xc-x,yc-y);
+        glVertex2i(xc+y,yc+x);
+        glVertex2i(xc-y,yc+x);
+        glVertex2i(xc+y,yc-x);
+        glVertex2i(xc-y,yc-x);
+
+        if(d<0) d+=2*x+3;
+        else{ d+=2*(x-y)+5; y--; }
+        x++;
+    }
+    glEnd();
+}
+
+// old drawCircle kept exactly same so nothing breaks
+void drawCircle(int xc,int yc,int r){
+    drawCircleMidpoint(xc,yc,r);
+}
+
+// filled circle helper for sun body
+void filledCircle(float cx, float cy, float r, int segs=60){
+    glBegin(GL_TRIANGLE_FAN);
+    glVertex2f(cx,cy);
+    for(int i=0;i<=segs;i++){
+        float a = i*2.0f*3.14159f/segs;
+        glVertex2f(cx+r*cos(a), cy+r*sin(a));
+    }
+    glEnd();
+}
+
+// ================= SUN (Midpoint Circle + Moving Rays via DDA) =================
+void drawSun(){
+    float cx = 75, cy = 75; // top right corner
+    int r = 10;
+
+    // moving rays using DDA
+    glColor3f(1.0f, 0.95f, 0.3f);
+    glPointSize(1.5f);
+    for(int i=0;i<12;i++){
+        float a = i * 3.14159f/6.0f + sunRayAngle;
+        float x1 = cx + (r+2)*cos(a);
+        float y1 = cy + (r+2)*sin(a);
+        float x2 = cx + (r+9)*cos(a);
+        float y2 = cy + (r+9)*sin(a);
+        drawLineDDA(x1, y1, x2, y2);
+    }
+
+    // sun body filled
+    glColor3f(1.0f, 0.88f, 0.10f);
+    filledCircle(cx, cy, r);
+
+    // midpoint circle outline
+    glColor3f(1.0f, 0.70f, 0.0f);
+    glPointSize(2.0f);
+    drawCircleMidpoint((int)cx, (int)cy, r);
+    drawCircleMidpoint((int)cx, (int)cy, r-1);
+}
+
+// ================= BIRD (DDA wings) =================
+void drawBird(float bx, float by, float wingAngle){
+    glColor3f(0.05f, 0.05f, 0.05f);
+    glPointSize(2.0f);
+
+    float ws = 6.0f;
+    float lx = bx - ws * cos(wingAngle);
+    float ly = by + ws * sin(wingAngle);
+    float rx = bx + ws * cos(wingAngle);
+    float ry = by + ws * sin(wingAngle);
+
+    // wings using DDA
+    drawLineDDA(lx, ly, bx, by);
+    drawLineDDA(bx, by, rx, ry);
+
+    // head dot
+    glBegin(GL_POINTS);
+    glVertex2f(bx+2.5f, by+1.0f);
+    glEnd();
+}
+
+// ================= SKY =================
+void drawSky(){
+    glBegin(GL_QUADS);
+    glColor3f(0.1,0.2,0.5);
+    glVertex2f(-100,0);
+    glVertex2f(100,0);
+    glColor3f(0.8,0.5,0.2);
+    glVertex2f(100,100);
+    glVertex2f(-100,100);
+    glEnd();
+}
+
+// ================= CLOUD =================
+void drawCloud(float x,float y){
+    glColor3f(1,1,1);
+    drawCircle(x,y,6);
+    drawCircle(x+6,y,5);
+    drawCircle(x-6,y,5);
+}
+
+// ================= WATER =================
+void drawWater(){
+    for(int y=-100;y<0;y+=2){
+        float shade = 0.2+(y+100)/200.0;
+        glColor3f(0,0.3+shade,0.7+shade);
+
+        glBegin(GL_LINE_STRIP);
+        for(int x=-100;x<=100;x++){
+            float wave = sin(x*0.1 + radarAngle*0.05 + y*0.05)*2;
+            glVertex2f(x,y+wave);
+        }
+        glEnd();
+    }
+}
+
+// ================= SHIP =================
+void drawShip(float x,float y){
+    glPushMatrix();
+    glTranslatef(x,y,0);
+
+    glColor3f(0.4,0.2,0.1);
+    glBegin(GL_POLYGON);
+    glVertex2f(-10,0);
+    glVertex2f(10,0);
+    glVertex2f(6,6);
+    glVertex2f(-6,6);
+    glEnd();
+
+    glColor3f(0.8,0.8,0.8);
+    glBegin(GL_QUADS);
+    glVertex2f(-3,6);
+    glVertex2f(3,6);
+    glVertex2f(3,10);
+    glVertex2f(-3,10);
+    glEnd();
+
+    glColor3f(0.2,0.1,0.05);
+    glBegin(GL_TRIANGLES);
+    glVertex2f(-10,0);
+    glVertex2f(-14,3);
+    glVertex2f(-10,6);
+    glEnd();
+
+    glColor3f(0.7,0.9,1);
+    drawLineDDA(-10,2,-20,2+sin(radarAngle*0.1)*2);
+
+    glPopMatrix();
+}
+
+// ================= CANNON =================
+void drawCannon(){
+    glPushMatrix();
+    glTranslatef(0,-80,0);
+
+    glColor3f(0.3,0.3,0.3);
+    glBegin(GL_QUADS);
+    glVertex2f(-10,-5); glVertex2f(10,-5);
+    glVertex2f(10,5); glVertex2f(-10,5);
+    glEnd();
+
+    glRotatef(cannonAngle,0,0,1);
+
+    glColor3f(0.1,0.1,0.1);
+    glBegin(GL_QUADS);
+    glVertex2f(0,-2);
+    glVertex2f(25,-2);
+    glVertex2f(25,2);
+    glVertex2f(0,2);
+    glEnd();
+
+    drawCircle(25,0,2);
+
+    glPopMatrix();
+}
+
+// ================= BULLETS =================
+void drawBullets(){
+    glColor3f(1,1,0);
+    for(auto &b:bullets)
+        if(b.active)
+            drawCircle(b.x,b.y,2);
+}
+
+// ================= PARTICLE EXPLOSION =================
+void drawParticles(){
+    glColor3f(1,0.5,0);
+    for(auto &p:particles){
+        if(p.life>0)
+            drawCircle(p.x,p.y,2);
+    }
+}
+
+// ================= RADAR =================
+void drawRadar(){
+    glPushMatrix();
+    glTranslatef(70,70,0);
+
+    glColor3f(0,1,0);
+    drawCircle(0,0,20);
+
+    float rad=radarAngle*M_PI/180;
+    drawLineDDA(0,0,cos(rad)*20,sin(rad)*20);
+
+    glPopMatrix();
+}
+
+// ================= DISPLAY =================
+void display(){
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    drawSky();
+    drawCloud(-50,70);
+    drawCloud(30,80);
+
+    // sun
+    drawSun();
+
+    // birds
+    for(auto &b:birds)
+        drawBird(b.x, b.y, b.wingAngle);
+
+    drawWater();
+
+    for(auto &s:ships)
+        drawShip(s.x,s.y);
+
+    drawCannon();
+    drawRadar();
+    drawBullets();
+    drawParticles();
+
+    char buf[50];
+    sprintf(buf,"Score: %d",score);
+    glColor3f(1,1,1);
+    glRasterPos2f(-90,90);
+    for(char* c=buf; *c; c++)
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18,*c);
+
+    glutSwapBuffers();
+}
+
+// ================= UPDATE =================
+void update(int v){
+    radarAngle+=2;
+
+    // sun ray rotation
+    sunRayAngle += 0.03f;
+
+    // birds move (translation) + wing flap (rotation)
+    for(auto &b:birds){
+        b.x += b.speed;
+        if(b.x > 105) b.x = -105;
+
+        b.wingAngle += b.wingDir * 0.15f;
+        if(b.wingAngle >  0.6f) b.wingDir = -1;
+        if(b.wingAngle < -0.1f) b.wingDir =  1;
+    }
+
+    for(auto &s:ships){
+        s.y-=s.speed;
+        s.x += sin(radarAngle*0.05)*0.05;
+        if(s.y<-100) s.y=100;
+    }
+
+    for(auto &b:bullets){
+        if(b.active){
+            b.x+=b.dx;
+            b.y+=b.dy;
+
+            for(auto &s:ships){
+                if(fabs(b.x-s.x)<5 && fabs(b.y-s.y)<5){
+                    b.active=false;
+                    s.y=100;
+                    score++;
+
+                    for(int i=0;i<20;i++){
+                        Particle p;
+                        p.x=s.x; p.y=s.y;
+                        float ang=i*18*M_PI/180;
+                        p.dx=cos(ang)*0.5;
+                        p.dy=sin(ang)*0.5;
+                        p.life=30;
+                        particles.push_back(p);
+                    }
+                }
+            }
+        }
+    }
+
+    for(auto &p:particles){
+        if(p.life>0){
+            p.x+=p.dx;
+            p.y+=p.dy;
+            p.life--;
+        }
+    }
+
+    glutPostRedisplay();
+    glutTimerFunc(16,update,0);
+}
+
+// ================= INPUT =================
+void keyboard(unsigned char key,int,int){
+    if(key=='a') cannonAngle+=5;
+    if(key=='d') cannonAngle-=5;
+
+    if(key==' '){
+        Bullet b;
+        b.x=0; b.y=-80;
+        float rad=cannonAngle*M_PI/180;
+        b.dx=cos(rad)*2;
+        b.dy=sin(rad)*2;
+        b.active=true;
+        bullets.push_back(b);
+    }
+}
+
+// ================= INIT =================
+void init(){
+    glClearColor(0.05,0.1,0.3,1);
+    gluOrtho2D(-100,100,-100,100);
+}
+
+// ================= MAIN =================
+int main(int argc,char** argv){
+    glutInit(&argc,argv);
+    glutInitDisplayMode(GLUT_DOUBLE|GLUT_RGB);
+    glutInitWindowSize(900,800);
+    glutCreateWindow("Cinematic Harbor Defense");
+
+    init();
+
+    glutDisplayFunc(display);
+    glutKeyboardFunc(keyboard);
+    glutTimerFunc(0,update,0);
+
+    glutMainLoop();
+}

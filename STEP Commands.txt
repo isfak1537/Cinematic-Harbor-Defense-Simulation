@@ -1,0 +1,49 @@
+UCRT64  
+STEP 1 — Install freeglut via MSYS2 (no downloading from websites needed)
+Open MSYS2 UCRT64 terminal (search it in Start Menu — make sure it says UCRT64, not MINGW64) and run:
+
+bashpacman -S mingw-w64-ucrt-x86_64-freeglut
+
+That's it. No manual file copying needed.
+
+ধাপ ২ থেকে বাংলায় গাইড 🇧🇩
+
+STEP 2 — প্রজেক্ট ফোল্ডার বানাও
+MSYS2 UCRT64 টার্মিনালে এই কমান্ড দাও:
+bash
+
+mkdir ~/village_project
+cd ~/village_project
+
+এটা তোমার Home ফোল্ডারের ভেতরে village_project নামে একটা ফোল্ডার বানাবে এবং সেখানে ঢুকবে।
+
+
+STEP 3 — .cpp ফাইল বানাও
+এখন এই কমান্ড দাও:
+bash
+
+notepad village_scene.cpp
+
+
+Notepad খুলবে। এরপর —
+
+এই conversation থেকে পুরো C++ কোডটা copy করো
+Notepad-এ paste করো (Ctrl+V)
+Save করো (Ctrl+S)
+Notepad বন্ধ করো
+
+STEP 1 — আগের exe মুছে ফেলো
+bashrm village.exe
+STEP 2 — নতুন করে compile করো
+bash
+
+g++ village_scene.cpp -o village.exe -lfreeglut -lopengl32 -lglu32
+
+STEP 3 — Run করো
+
+bash./village.exe
+
+তবুও যদি পুরনো output na আসে —
+তাহলে নিশ্চিত করো যে সঠিক ফোল্ডারে আছো। এই কমান্ড দাও:
+
+bashcat village_scene.cpp | head -5
